@@ -49,6 +49,30 @@ namespace
 
         return midnightLocal;
     }
+
+    // Returns the next time_t for the given weekday (0=Sunday, 1=Monday, ..., 6=Saturday) at the given hour/min/sec
+    time_t GetNextWeekdayTime(time_t now, int weekday, uint8 hour, uint8 minute, uint8 second)
+    {
+        tm timeLocal = Acore::Time::TimeBreakdown(now);
+        int currentWeekday = timeLocal.tm_wday;
+        int daysUntil = (weekday - currentWeekday + 7) % 7;
+        if (daysUntil == 0)
+        {
+            // If today, check if the time has already passed
+            if (timeLocal.tm_hour > hour ||
+                (timeLocal.tm_hour == hour && timeLocal.tm_min > minute) ||
+                (timeLocal.tm_hour == hour && timeLocal.tm_min == minute && timeLocal.tm_sec >= second))
+            {
+                daysUntil = 7;
+            }
+        }
+        timeLocal.tm_mday += daysUntil;
+        timeLocal.tm_hour = hour;
+        timeLocal.tm_min = minute;
+        timeLocal.tm_sec = second;
+        time_t result = mktime(&timeLocal);
+        return result;
+    }
 }
 
 /*static*/ ServerAutoShutdown* ServerAutoShutdown::instance()
@@ -91,10 +115,29 @@ void ServerAutoShutdown::Init()
         return;
     }
 
+    int weekday = sConfigMgr->GetOption<int>("ServerAutoShutdown.Weekday", -1);
     uint32 day =  sConfigMgr->GetOption<uint32>("ServerAutoShutdown.EveryDays", 1);
     uint8 hour = *Acore::StringTo<uint8>(tokens.at(0));
     uint8 minute = *Acore::StringTo<uint8>(tokens.at(1));
     uint8 second = *Acore::StringTo<uint8>(tokens.at(2));
+
+    auto nowTime = time(nullptr);
+    uint64 nextResetTime = 0;
+
+    if (weekday >= 0 && weekday <= 6)
+    {
+        nextResetTime = GetNextWeekdayTime(nowTime, weekday, hour, minute, second);
+    }
+    else
+    {
+        if (day < 1 || day > 365)
+        {
+            LOG_ERROR("module", "> ServerAutoShutdown: Incorrect day in config option 'ServerAutoShutdown.EveryDays' - '{}'", day);
+            _isEnableModule = false;
+            return;
+        }
+        nextResetTime = GetNextResetTime(nowTime, day, hour, minute, second);
+    }
 
     if (day < 1 || day > 365)
     {
@@ -117,15 +160,15 @@ void ServerAutoShutdown::Init()
         _isEnableModule = false;
     }
 
-    auto nowTime = time(nullptr);
-    //Seconds nowTime = GameTime::GetGameTime();
-    uint64 nextResetTime = GetNextResetTime(nowTime, day, hour, minute, second);
     uint32 diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
 
     if (diffToShutdown < 10)
     {
-        LOG_WARN("module", "> ServerAutoShutdown: Next time to shutdown < 10 seconds, Set next day");
-        nextResetTime += 86400 * day;
+        LOG_WARN("module", "> ServerAutoShutdown: Next time to shutdown < 10 seconds, Set next period");
+        if (weekday >= 0 && weekday <= 6)
+            nextResetTime += 7 * 86400;
+        else
+            nextResetTime += 86400 * day;
         diffToShutdown = nextResetTime - static_cast<uint32>(nowTime);
     }
 
