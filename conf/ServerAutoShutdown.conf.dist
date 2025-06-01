@@ -30,7 +30,7 @@ ServerAutoShutdown.EveryDays = 1
 #        Default:     -1 (disabled)
 #
 
-ServerAutoShutdown.Weekday = 3
+ServerAutoShutdown.Weekday = -1
 
 #
 #    ServerAutoShutdown.Time
